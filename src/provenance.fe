@@ -1,0 +1,237 @@
+// SPDX-License-Identifier: MIT
+// New contest implementation, started 2026-11-03 (Fe 26.5 native).
+
+pub struct NodeId { value: u16 }
+pub struct RunId { value: u16 }
+pub struct InputPort { value: u16 }
+pub struct OutputPort { value: u16 }
+pub struct ItemId { value: u16 }
+impl Copy for NodeId {}
+impl Copy for RunId {}
+impl Copy for InputPort {}
+impl Copy for OutputPort {}
+impl Copy for ItemId {}
+
+// An input selects a source on the CONSUMER. An output addresses the PRODUCER.
+// Keeping those types separate makes the original input-1/output-0 bug visible.
+pub struct ProducerRef { node: NodeId, run: RunId, output: OutputPort }
+impl Copy for ProducerRef {}
+impl ProducerRef {
+    pub const ZERO: Self = Self::new(0, 0, 0)
+    pub const fn new(_ node: u16, _ run: u16, _ output: u16) -> Self {
+        Self { node: NodeId { value: node }, run: RunId { value: run }, output: OutputPort { value: output } }
+    }
+    pub fn same(self, _ other: Self) -> bool {
+        self.node.value == other.node.value && self.run.value == other.run.value && self.output.value == other.output.value
+    }
+}
+
+pub struct Coordinate { producer: ProducerRef, item: ItemId }
+impl Copy for Coordinate {}
+impl Coordinate {
+    pub const ZERO: Self = Self::new(0, 0, 0, 0)
+    pub const fn new(_ node: u16, _ run: u16, _ output: u16, _ item: u16) -> Self {
+        Self { producer: ProducerRef::new(node, run, output), item: ItemId { value: item } }
+    }
+    pub fn same(self, _ other: Self) -> bool {
+        self.producer.same(other.producer) && self.item.value == other.item.value
+    }
+}
+
+pub const fn word_count(_ roots: usize) -> usize { (roots + 63) / 64 }
+pub struct RootSet<const R: usize> where R > 0 && R <= 256 { words: [u64; word_count(R)] }
+impl<const R: usize> Copy for RootSet<R> {}
+impl<const R: usize> RootSet<R> {
+    pub const EMPTY: Self = Self { words: [0; word_count(R)] }
+    pub fn put(mut self, _ item: usize) {
+        core::assert(item < R)
+        self.words[item / 64] |= 1 << (item % 64).downcast_truncate()
+    }
+    pub fn has(self, _ item: usize) -> bool {
+        core::assert(item < R)
+        (self.words[item / 64] & (1 << (item % 64).downcast_truncate())) != 0
+    }
+    pub fn same(self, _ other: Self) -> bool {
+        var i: usize = 0
+        while i < word_count(R) {
+            if self.words[i] != other.words[i] { return false }
+            i += 1
+        }
+        true
+    }
+    pub fn union(mut self, _ other: Self) {
+        var i: usize = 0
+        while i < word_count(R) {
+            self.words[i] |= other.words[i]
+            i += 1
+        }
+    }
+}
+
+struct Source {
+    node: NodeId, run: RunId, inlet: InputPort, producer: ProducerRef, valid: bool,
+}
+impl Copy for Source {}
+impl Source {
+    const EMPTY: Self = Self { node: NodeId { value: 0 }, run: RunId { value: 0 }, inlet: InputPort { value: 0 }, producer: ProducerRef::ZERO, valid: false }
+}
+struct Pair { item: ItemId, inlet: InputPort, overwritten: bool, producer: ProducerRef, valid: bool }
+impl Copy for Pair {}
+impl Pair {
+    const EMPTY: Self = Self { item: ItemId { value: 0 }, inlet: InputPort { value: 0 }, overwritten: false, producer: ProducerRef::ZERO, valid: false }
+}
+struct Vertex { at: Coordinate, pair_start: usize, pair_count: usize, valid: bool }
+impl Copy for Vertex {}
+impl Vertex { const EMPTY: Self = Self { at: Coordinate::ZERO, pair_start: 0, pair_count: 0, valid: false } }
+struct Frame { vertex: usize, next_pair: usize }
+impl Copy for Frame {}
+impl Frame { const EMPTY: Self = Self { vertex: 0, next_pair: 0 } }
+
+// Bounded, allocation-free first edition. At this scale linear lookups are
+// simpler than a second index. A larger edition can replace the two resolvers.
+pub struct Graph {
+    sources: [Source; 1024], source_count: usize,
+    pairs: [Pair; 1024], pair_count: usize,
+    vertices: [Vertex; 256], vertex_count: usize,
+    memo: [RootSet<256>; 256], colour: [u8; 256],
+    root_count: u16, root: ProducerRef,
+    issue: u16,
+}
+impl Graph {
+    pub fn new(_ root_count: u16, _ root: ProducerRef) -> Self {
+        Self {
+            sources: [Source::EMPTY; 1024], source_count: 0,
+            pairs: [Pair::EMPTY; 1024], pair_count: 0,
+            vertices: [Vertex::EMPTY; 256], vertex_count: 0,
+            memo: [RootSet<256>::EMPTY; 256], colour: [0; 256],
+            root_count, root, issue: if root_count == 0 || root_count > 256 { 1 } else { 0 },
+        }
+    }
+    pub fn failure(self) -> u16 { self.issue }
+    pub fn count(self) -> usize { self.vertex_count }
+    pub fn add_source(mut self, _ node: u16, _ run: u16, _ inlet: u16, _ producer: ProducerRef, _ valid: bool) {
+        if self.source_count == 1024 { self.issue = 1
+            return }
+        self.sources[self.source_count] = Source { node: NodeId { value: node }, run: RunId { value: run }, inlet: InputPort { value: inlet }, producer, valid }
+        self.source_count += 1
+    }
+    pub fn add_pair(mut self, _ item: u16, _ inlet: u16, _ overwritten: bool, _ producer: ProducerRef, _ valid: bool) {
+        if self.pair_count == 1024 { self.issue = 1
+            return }
+        self.pairs[self.pair_count] = Pair { item: ItemId { value: item }, inlet: InputPort { value: inlet }, overwritten, producer, valid }
+        self.pair_count += 1
+    }
+    pub fn add_vertex(mut self, _ at: Coordinate, _ pair_start: usize, _ pair_count: usize, _ valid: bool) {
+        if self.vertex_count == 256 { self.issue = 1
+            return }
+        self.vertices[self.vertex_count] = Vertex { at, pair_start, pair_count, valid }
+        self.vertex_count += 1
+    }
+
+    // The only consumer-port -> producer resolver. Pair.input never becomes
+    // the producer output; previousNodeOutput comes from the source record.
+    fn source_for(mut self, _ node: NodeId, _ run: RunId, _ inlet: InputPort) -> ProducerRef {
+        var i: usize = 0
+        var found: usize = 1024
+        while i < self.source_count {
+            let source = self.sources[i]
+            if source.node.value == node.value && source.run.value == run.value && source.inlet.value == inlet.value {
+                if found != 1024 || !source.valid { self.issue = 2
+            return ProducerRef::ZERO }
+                found = i
+            }
+            i += 1
+        }
+        if found == 1024 { self.issue = 2
+            return ProducerRef::ZERO }
+        self.sources[found].producer
+    }
+
+    // The independent producer-coordinate -> item resolver.
+    fn item_at(mut self, _ producer: ProducerRef, _ item: ItemId) -> usize {
+        var i: usize = 0
+        var found: usize = 256
+        while i < self.vertex_count {
+            let at = self.vertices[i].at
+            if at.producer.same(producer) && at.item.value == item.value {
+                if found != 256 { self.issue = 3
+            return 256 }
+                found = i
+            }
+            i += 1
+        }
+        if found == 256 { self.issue = 3 }
+        found
+    }
+
+    // Each grey frame retains its cursor until its producer becomes black.
+    // This preserves every fan-in parent, deduplicates roots, and rejects cycles.
+    pub fn trace(mut self, _ at: Coordinate) -> usize {
+        if self.issue != 0 { return 256 }
+        let start = self.item_at(at.producer, at.item)
+        if start == 256 { return 256 }
+        if self.colour[start] == 2 { return start }
+        var stack: [Frame; 256] = [Frame::EMPTY; 256]
+        stack[0] = Frame { vertex: start, next_pair: 0 }
+        var depth: usize = 1
+        self.colour[start] = 1
+        while depth > 0 {
+            let top = depth - 1
+            let vertex_index = stack[top].vertex
+            let vertex = self.vertices[vertex_index]
+            if !vertex.valid || vertex.pair_count == 0 || vertex.pair_start > self.pair_count || vertex.pair_count > self.pair_count - vertex.pair_start {
+                self.issue = 4
+                return 256
+            }
+            let cursor = stack[top].next_pair
+            if cursor == vertex.pair_count {
+                self.colour[vertex_index] = 2
+                depth -= 1
+                continue
+            }
+            let pair = self.pairs[vertex.pair_start + cursor]
+            if !pair.valid { self.issue = 4
+            return 256 }
+            if vertex.at.producer.same(self.root) {
+                if pair.overwritten || pair.inlet.value != 0 || pair.item.value != vertex.at.item.value || pair.item.value >= self.root_count {
+                    self.issue = 5
+                    return 256
+                }
+                self.memo[vertex_index].put(pair.item.value as usize)
+                stack[top].next_pair += 1
+                continue
+            }
+            let producer = if pair.overwritten {
+                pair.producer
+            } else {
+                self.source_for(vertex.at.producer.node, vertex.at.producer.run, pair.inlet)
+            }
+            if self.issue != 0 { return 256 }
+            let child = self.item_at(producer, pair.item)
+            if child == 256 { return 256 }
+            if self.colour[child] == 1 { self.issue = 6
+            return 256 }
+            if self.colour[child] == 0 {
+                if depth == 256 { self.issue = 1
+            return 256 }
+                stack[depth] = Frame { vertex: child, next_pair: 0 }
+                self.colour[child] = 1
+                depth += 1
+                continue
+            }
+            var word: usize = 0
+            while word < 4 {
+                // A local copy avoids overlapping nested mutable borrows in Fe.
+                let value = self.memo[child].words[word]
+                self.memo[vertex_index].words[word] |= value
+                word += 1
+            }
+            stack[top].next_pair += 1
+        }
+        start
+    }
+    pub fn roots(self, _ index: usize) -> RootSet<256> {
+        core::assert(index < self.vertex_count && self.colour[index] == 2 && self.issue == 0)
+        self.memo[index]
+    }
+}

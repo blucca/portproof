@@ -1,0 +1,83 @@
+// Generated from original-child.json raw sources/pairedItem. No ancestry computation.
+use ingot::{Graph, ProducerRef, Coordinate, RootSet}
+// child node 1: Start
+// child node 2: Left Limit
+// child node 3: Left Project
+// child node 4: Right Sort
+// child node 5: Right Limit
+// child node 6: Right Project
+// child node 7: Select
+// child node 8: Return
+pub fn recorded_graph() -> Graph {
+    var graph = Graph::new(4, ProducerRef::new(1, 0, 0))
+    graph.add_pair(0, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(1, 0, 0, 0), 0, 1, true)
+    graph.add_pair(1, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(1, 0, 0, 1), 1, 1, true)
+    graph.add_pair(2, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(1, 0, 0, 2), 2, 1, true)
+    graph.add_pair(3, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(1, 0, 0, 3), 3, 1, true)
+    graph.add_source(2, 0, 0, ProducerRef::new(1, 0, 0), true)
+    graph.add_pair(0, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(2, 0, 0, 0), 4, 1, true)
+    graph.add_pair(1, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(2, 0, 0, 1), 5, 1, true)
+    graph.add_source(3, 0, 0, ProducerRef::new(2, 0, 0), true)
+    graph.add_pair(0, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(3, 0, 0, 0), 6, 1, true)
+    graph.add_pair(1, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(3, 0, 0, 1), 7, 1, true)
+    graph.add_source(4, 0, 0, ProducerRef::new(1, 0, 0), true)
+    graph.add_pair(3, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(4, 0, 0, 0), 8, 1, true)
+    graph.add_pair(2, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(4, 0, 0, 1), 9, 1, true)
+    graph.add_pair(1, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(4, 0, 0, 2), 10, 1, true)
+    graph.add_pair(0, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(4, 0, 0, 3), 11, 1, true)
+    graph.add_source(5, 0, 0, ProducerRef::new(4, 0, 0), true)
+    graph.add_pair(0, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(5, 0, 0, 0), 12, 1, true)
+    graph.add_pair(1, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(5, 0, 0, 1), 13, 1, true)
+    graph.add_source(6, 0, 0, ProducerRef::new(5, 0, 0), true)
+    graph.add_pair(0, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(6, 0, 0, 0), 14, 1, true)
+    graph.add_pair(1, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(6, 0, 0, 1), 15, 1, true)
+    graph.add_source(7, 0, 0, ProducerRef::new(3, 0, 0), true)
+    graph.add_source(7, 0, 1, ProducerRef::new(6, 0, 0), true)
+    graph.add_pair(0, 1, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(7, 0, 0, 0), 16, 1, true)
+    graph.add_pair(1, 1, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(7, 0, 0, 1), 17, 1, true)
+    graph.add_source(8, 0, 0, ProducerRef::new(7, 0, 0), true)
+    graph.add_pair(0, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(8, 0, 0, 0), 18, 1, true)
+    graph.add_pair(1, 0, false, ProducerRef::new(0, 0, 0), true)
+    graph.add_vertex(Coordinate::new(8, 0, 0, 1), 19, 1, true)
+    graph
+}
+pub fn original_0() -> RootSet<256> {
+    var roots = RootSet<256>::EMPTY
+    roots.put(0)
+    roots
+}
+pub fn original_1() -> RootSet<256> {
+    var roots = RootSet<256>::EMPTY
+    roots.put(1)
+    roots
+}
+pub fn repaired_0() -> RootSet<256> {
+    var roots = RootSet<256>::EMPTY
+    roots.put(3)
+    roots
+}
+pub fn repaired_1() -> RootSet<256> {
+    var roots = RootSet<256>::EMPTY
+    roots.put(2)
+    roots
+}
+pub const TERMINAL_NODE: u16 = 8

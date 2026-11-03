@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: MIT
+pub use provenance::{Graph, ProducerRef, Coordinate, RootSet}
+use std::io::{Write, host, write, write_char}
+use recorded::{recorded_graph, original_0, original_1, repaired_0, repaired_1, TERMINAL_NODE}
+
+fn print_roots(_ roots: RootSet<256>) uses (w: mut Write) {
+    write("[")
+    var i: usize = 0
+    var first = true
+    while i < 4 {
+        if roots.has(i) {
+            if !first { write(",") }
+            let digit: i32 = i.downcast_truncate()
+            write_char(digit + 48)
+            first = false
+        }
+        i += 1
+    }
+    write("]")
+}
+pub fn main() -> i32 {
+    var graph = recorded_graph()
+    let first = graph.trace(Coordinate::new(TERMINAL_NODE, 0, 0, 0))
+    let second = graph.trace(Coordinate::new(TERMINAL_NODE, 0, 0, 1))
+    if first == 256 || second == 256 { return 2 }
+    let a = graph.roots(first)
+    let b = graph.roots(second)
+    var expected_a = RootSet<256>::EMPTY
+    expected_a.put(3)
+    var expected_b = RootSet<256>::EMPTY
+    expected_b.put(2)
+    if !a.same(expected_a) || !b.same(expected_b) { return 3 }
+    if a.same(original_0()) || b.same(original_1()) { return 4 }
+    if !a.same(repaired_0()) || !b.same(repaired_1()) { return 5 }
+    with (Write = host()) {
+        write("{\"fe_computed_expected\":[")
+        print_roots(a)
+        write(",")
+        print_roots(b)
+        write("],\"original_observed\":[")
+        print_roots(original_0())
+        write(",")
+        print_roots(original_1())
+        write("],\"original\":\"mismatch\",\"repaired_observed\":[")
+        print_roots(repaired_0())
+        write(",")
+        print_roots(repaired_1())
+        write("],\"repaired\":\"consistent\"}\n")
+    }
+    0
+}
