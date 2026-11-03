@@ -1,0 +1,22 @@
+name: Fe native boundary
+on: [push, pull_request]
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Fe 26.5.0
+        run: |
+          curl -fsSL --retry 2 https://github.com/argotorg/fe/releases/download/v26.5.0/fe_linux_amd64 -o "$RUNNER_TEMP/fe"
+          chmod +x "$RUNNER_TEMP/fe"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Build and check the native contract
+        run: |
+          fe --version
+          fe check .
+          fe test . --backend native --jobs 1
+          fe build . --backend native --out-dir build
+          node scripts/check.cjs

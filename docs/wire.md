@@ -1,4 +1,4 @@
-# PPF1: a raw-record transport, not a root certificate
+# PPF1: raw-record transport
 
 All integers are unsigned, little-endian; `u16` except the two payload slice fields
 and pool length (`u32`). Every array retains original order. Node symbols are
@@ -49,3 +49,35 @@ pairs), 128 KiB payload pool, 256 caller roots. A structural extraction failure
 uses format_errors > 0 and a zero-count envelope; Fe returns incomplete/exit 2.
 Fe reads the whole valid transport before deciding: any required missing or
 unsupported evidence takes precedence over a discovered root mismatch.
+
+## Native incomplete issue codes
+
+| Code | Evidence to supply or repair |
+|---|---|
+| 10 | Complete transport: a read ended early |
+| 11 | PPF1 magic |
+| 12 | Extractable saved records, accepted counts and header flags |
+| 13 | EOF immediately after the canonical pool |
+| 14 | Native byte-pool allocation |
+| 15 | Coherent task/source/output/item table intervals and coordinates |
+| 20 | Present valid execution/workflow IDs and successful executions |
+| 21 | Exactly one parent call matching this child execution ID |
+| 22 | Execute Workflow 1.2, waiting once mode, matching child workflow ID |
+| 23 | Exactly one saved child input boundary at run 0 |
+| 24 | Passthrough trigger and matching parent execution/workflow metadata |
+| 25 | One saved caller source edge and one trigger output |
+| 26 | 1–256 matching caller/trigger inputs, JSON and identity pairings |
+| 27 | Saved terminal node/run |
+| 28 | Matching complete caller/terminal output and item shape |
+| 29 | Child graph capacity |
+| 30 | Matching returned JSON and valid caller boundary pairings |
+| 31 | Complete child ancestry: inspect `graph_issue` below |
+| 32 | At least one returned item to inspect |
+
+Graph issues: **1** capacity, **2** missing/invalid consumer source, **3**
+missing/ambiguous producer item, **4** missing/invalid paired evidence, **5**
+invalid trigger identity pairing, **6** cycle. Completed findings can remain in
+an incomplete report; the aggregate status and exit code describe the whole call.
+
+The canonical pool uses Fe's native heap `ByteBuffer`, bounded to 128 KiB and
+explicitly released after the audit. Root sets and graph frames remain fixed-size.

@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: MIT
+use ingot::provenance::RootSet
+
+#[test]
+fn dependent_root_set_and_union() {
+    var small = RootSet<65>::EMPTY
+    small.put(0)
+    small.put(64)
+    assert!(small.has(0) && small.has(64) && !small.has(63))
+    var a = RootSet<256>::EMPTY
+    a.put(1)
+    var b = RootSet<256>::EMPTY
+    b.put(193)
+    a.union(b)
+    assert!(a.has(1) && a.has(193) && !a.has(192))
+    a.union(b)
+    var expected = RootSet<256>::EMPTY
+    expected.put(1)
+    expected.put(193)
+    assert!(a.same(expected))
+}

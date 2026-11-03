@@ -1,51 +1,86 @@
 // SPDX-License-Identifier: MIT
 pub use provenance::{Graph, ProducerRef, Coordinate, RootSet}
-use std::io::{Write, host, write, write_char}
-use recorded::{recorded_graph, original_0, original_1, repaired_0, repaired_1, TERMINAL_NODE}
+use std::io::{Read, Write, host, write, write_char}
+use transport::read_records
+use audit::{audit, Report}
 
-fn print_roots(_ roots: RootSet<256>) uses (w: mut Write) {
+fn number(_ value: u32) uses (w: mut Write) {
+    if value == 0 { write("0")
+        return }
+    var remaining = value
+    var digits: [u8; 10] = [0; 10]
+    var count: usize = 0
+    while remaining > 0 {
+        digits[count] = (remaining % 10).downcast_truncate()
+        count += 1
+        remaining /= 10
+    }
+    while count > 0 {
+        count -= 1
+        write_char(digits[count] as i32 + 48)
+    }
+}
+fn print_roots(_ roots: RootSet<256>, _ count: u16) uses (w: mut Write) {
     write("[")
     var i: usize = 0
     var first = true
-    while i < 4 {
+    while i < count as usize {
         if roots.has(i) {
             if !first { write(",") }
-            let digit: i32 = i.downcast_truncate()
-            write_char(digit + 48)
+            number(i.downcast_truncate())
             first = false
         }
         i += 1
     }
     write("]")
 }
-pub fn main() -> i32 {
-    var graph = recorded_graph()
-    let first = graph.trace(Coordinate::new(TERMINAL_NODE, 0, 0, 0))
-    let second = graph.trace(Coordinate::new(TERMINAL_NODE, 0, 0, 1))
-    if first == 256 || second == 256 { return 2 }
-    let a = graph.roots(first)
-    let b = graph.roots(second)
-    var expected_a = RootSet<256>::EMPTY
-    expected_a.put(3)
-    var expected_b = RootSet<256>::EMPTY
-    expected_b.put(2)
-    if !a.same(expected_a) || !b.same(expected_b) { return 3 }
-    if a.same(original_0()) || b.same(original_1()) { return 4 }
-    if !a.same(repaired_0()) || !b.same(repaired_1()) { return 5 }
-    with (Write = host()) {
-        write("{\"fe_computed_expected\":[")
-        print_roots(a)
-        write(",")
-        print_roots(b)
-        write("],\"original_observed\":[")
-        print_roots(original_0())
-        write(",")
-        print_roots(original_1())
-        write("],\"original\":\"mismatch\",\"repaired_observed\":[")
-        print_roots(repaired_0())
-        write(",")
-        print_roots(repaired_1())
-        write("],\"repaired\":\"consistent\"}\n")
+fn print_report(_ report: Report) uses (w: mut Write) {
+    write("{\"status\":\"")
+    if report.issue != 0 { write("incomplete") }
+    else if report.mismatches > 0 { write("mismatch") }
+    else { write("consistent") }
+    write("\",\"issue_code\":")
+    number(report.issue as u32)
+    write(",\"graph_issue\":")
+    number(report.graph_issue as u32)
+    write(",\"caller_roots\":")
+    number(report.root_count as u32)
+    write(",\"call_node_symbol\":")
+    number(report.call_node as u32)
+    write(",\"call_run\":")
+    number(report.call_run as u32)
+    write(",\"terminal_run\":")
+    number(report.terminal_run as u32)
+    write(",\"checked_items\":")
+    number(report.checked.downcast_truncate())
+    write(",\"mismatches\":")
+    number(report.mismatches.downcast_truncate())
+    write(",\"findings\":[")
+    var i: usize = 0
+    while i < report.checked {
+        if i > 0 { write(",") }
+        let finding = report.findings[i]
+        write("{\"output\":")
+        number(finding.output as u32)
+        write(",\"item\":")
+        number(finding.item as u32)
+        write(",\"expected\":")
+        print_roots(finding.expected, report.root_count)
+        write(",\"observed\":")
+        print_roots(finding.observed, report.root_count)
+        write(",\"status\":\"")
+        if finding.mismatch { write("mismatch") } else { write("consistent") }
+        write("\"}")
+        i += 1
     }
-    0
+    write("]}\n")
+}
+pub fn main() -> i32 {
+    with (Read = host()) {
+        let records = read_records()
+        let report = audit(records)
+        records.release()
+        with (Write = host()) { print_report(report) }
+        return report.exit()
+    }
 }

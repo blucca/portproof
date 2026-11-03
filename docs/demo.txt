@@ -1,0 +1,31 @@
+PortProof 0.1.0 — native CLI transcript, 2026-11-03
+$ fe --version
+fe 26.5.0 (3dab95f)
+$ node scripts/portproof.cjs fixtures/real/original-parent.json fixtures/real/original-child.json
+{"status":"mismatch","issue_code":0,"graph_issue":0,"caller_roots":4,"call_node_symbol":3,"call_run":0,"terminal_run":0,"checked_items":2,"mismatches":2,"findings":[{"output":0,"item":0,"expected":[3],"observed":[0],"status":"mismatch"},{"output":0,"item":1,"expected":[2],"observed":[1],"status":"mismatch"}]}
+Process exit: 1
+
+$ node scripts/portproof.cjs fixtures/real/repaired-parent.json fixtures/real/repaired-child.json
+{"status":"consistent","issue_code":0,"graph_issue":0,"caller_roots":4,"call_node_symbol":3,"call_run":0,"terminal_run":0,"checked_items":2,"mismatches":0,"findings":[{"output":0,"item":0,"expected":[3],"observed":[3],"status":"consistent"},{"output":0,"item":1,"expected":[2],"observed":[2],"status":"consistent"}]}
+Process exit: 0
+
+Native Fe unit result:
+PASS  [0.0036s] dependent_root_set_and_union
+
+test result: ok. 1 passed; 0 failed
+
+End-to-end native checks:
+PASS original: equal business JSON, wrong recorded roots
+PASS repaired: complete bilateral boundary is consistent
+PASS both child workflow IDs absent
+PASS both parent workflow IDs absent
+PASS missing later evidence takes precedence over an earlier mismatch
+PASS cycle stops the native traversal
+PASS changed caller output payload needs complete boundary evidence
+PASS consumer input 8 has no saved source
+PASS run 1 / output 1, fan-in, deduplication and fourth bitset word
+PASS internal sourceOverwrite supplies its own producer coordinates
+PASS parent and child Start names retain separate execution scopes
+PASS extractor failure envelope
+PASS extra transport byte
+13 native contract checks passed

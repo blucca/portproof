@@ -1,0 +1,140 @@
+// SPDX-License-Identifier: MIT
+// PPF1 contains raw coordinates and payload bytes. Decisions belong to audit.fe.
+use std::io::{Read, read_char}
+use std::native::ByteBuffer
+
+pub struct Records {
+    pub issue: u16,
+    pub definition_count: usize,
+    pub task_count: usize,
+    pub source_count: usize,
+    pub output_count: usize,
+    pub item_count: usize,
+    pub pair_count: usize,
+    pub terminal_node: u16,
+    pub terminal_present: u16,
+    pub parent: [u16; 5],
+    pub child: [u16; 5],
+    pub definitions: [[u16; 7]; 256],
+    pub tasks: [[u16; 17]; 256],
+    pub sources: [[u16; 8]; 1024],
+    pub outputs: [[u16; 6]; 1024],
+    pub items: [[u32; 11]; 768],
+    pub pairs: [[u16; 7]; 2048],
+    pub pool: ByteBuffer,
+    pub pool_length: usize,
+}
+
+impl Records {
+    pub fn release(own self) { self.pool.release() }
+    pub fn empty() -> Self {
+        Self {
+            issue: 0, definition_count: 0, task_count: 0, source_count: 0,
+            output_count: 0, item_count: 0, pair_count: 0,
+            terminal_node: 0, terminal_present: 0,
+            parent: [0; 5], child: [0; 5],
+            definitions: [[0; 7]; 256], tasks: [[0; 17]; 256],
+            sources: [[0; 8]; 1024], outputs: [[0; 6]; 1024],
+            items: [[0; 11]; 768], pairs: [[0; 7]; 2048],
+            pool: ByteBuffer::new(), pool_length: 0,
+        }
+    }
+}
+struct Reader { issue: u16 }
+impl Reader {
+    fn byte(mut self) -> u8 uses (r: mut Read) {
+        let value = read_char()
+        if value < 0 { self.issue = 10
+            return 0 }
+        value.downcast_truncate()
+    }
+    fn short(mut self) -> u16 uses (r: mut Read) {
+        let low = self.byte() as u16
+        let high = self.byte() as u16
+        low | (high << 8)
+    }
+    fn integer(mut self) -> u32 uses (r: mut Read) {
+        let low = self.short() as u32
+        let high = self.short() as u32
+        low | (high << 16)
+    }
+    fn table<const ROWS: usize, const FIELDS: usize>(mut self, _ count: usize) -> [[u16; FIELDS]; ROWS] uses (r: mut Read) {
+        core::assert(count <= ROWS)
+        var result: [[u16; FIELDS]; ROWS] = [[0; FIELDS]; ROWS]
+        var i: usize = 0
+        while i < count {
+            var j: usize = 0
+            while j < FIELDS {
+                result[i][j] = self.short()
+                j += 1
+            }
+            if self.issue != 0 { return result }
+            i += 1
+        }
+        result
+    }
+}
+
+pub fn read_records() -> Records uses (r: mut Read) {
+    var records = Records::empty()
+    var reader = Reader { issue: 0 }
+    if reader.byte() != 80 || reader.byte() != 80 || reader.byte() != 70 || reader.byte() != 49 {
+        records.issue = 11
+        return records
+    }
+    let extraction_errors = reader.short()
+    records.definition_count = reader.short() as usize
+    records.task_count = reader.short() as usize
+    records.source_count = reader.short() as usize
+    records.output_count = reader.short() as usize
+    records.item_count = reader.short() as usize
+    records.pair_count = reader.short() as usize
+    records.terminal_node = reader.short()
+    records.terminal_present = reader.short()
+    records.pool_length = reader.integer() as usize
+    var i: usize = 0
+    while i < 5 {
+        records.parent[i] = reader.short()
+        i += 1
+    }
+    i = 0
+    while i < 5 {
+        records.child[i] = reader.short()
+        i += 1
+    }
+    if reader.issue != 0 || extraction_errors != 0 || records.definition_count > 256 || records.task_count > 256 || records.source_count > 1024 || records.output_count > 1024 || records.item_count > 768 || records.pair_count > 2048 || records.pool_length > 131072 || records.terminal_present > 1 {
+        records.issue = 12
+        return records
+    }
+    records.definitions = reader.table<256, 7>(records.definition_count)
+    records.tasks = reader.table<256, 17>(records.task_count)
+    records.sources = reader.table<1024, 8>(records.source_count)
+    records.outputs = reader.table<1024, 6>(records.output_count)
+    i = 0
+    while i < records.item_count {
+        var j: usize = 0
+        while j < 9 {
+            records.items[i][j] = reader.short() as u32
+            j += 1
+        }
+        records.items[i][9] = reader.integer()
+        records.items[i][10] = reader.integer()
+        if reader.issue != 0 { records.issue = reader.issue
+            return records }
+        i += 1
+    }
+    records.pairs = reader.table<2048, 7>(records.pair_count)
+    if !records.pool.try_resize(records.pool_length.downcast_truncate()) { records.issue = 14
+        return records }
+    i = 0
+    while i < records.pool_length {
+        let value = reader.byte()
+        records.pool.set_byte(index: i.downcast_truncate(), value: value)
+        if reader.issue != 0 { records.issue = reader.issue
+            return records }
+        i += 1
+    }
+    if reader.issue != 0 { records.issue = reader.issue }
+    if read_char() >= 0 { records.issue = 13 }
+    records
+}

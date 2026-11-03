@@ -1,0 +1,287 @@
+// SPDX-License-Identifier: MIT
+use ingot::provenance::{Graph, ProducerRef, Coordinate, RootSet}
+use ingot::transport::Records
+
+pub struct Finding {
+    pub output: u16, pub item: u16,
+    pub expected: RootSet<256>, pub observed: RootSet<256>, pub mismatch: bool,
+}
+impl Copy for Finding {}
+impl Finding {
+    const EMPTY: Self = Self { output: 0, item: 0, expected: RootSet<256>::EMPTY, observed: RootSet<256>::EMPTY, mismatch: false }
+}
+pub struct Report {
+    pub issue: u16, pub graph_issue: u16,
+    pub root_count: u16, pub call_node: u16, pub call_run: u16, pub terminal_run: u16,
+    pub checked: usize, pub mismatches: usize, pub findings: [Finding; 256],
+}
+impl Report {
+    fn new() -> Self {
+        Self { issue: 0, graph_issue: 0, root_count: 0, call_node: 0, call_run: 0, terminal_run: 0,
+            checked: 0, mismatches: 0, findings: [Finding::EMPTY; 256] }
+    }
+    pub fn exit(self) -> i32 { if self.issue != 0 { 2 } else if self.mismatches > 0 { 1 } else { 0 } }
+}
+fn valid_id(_ symbol: u16, _ kind: u16) -> bool { symbol > 0 && (kind == 1 || kind == 2) }
+fn same_id(_ a: u16, _ a_kind: u16, _ b: u16, _ b_kind: u16) -> bool {
+    valid_id(a, a_kind) && valid_id(b, b_kind) && a == b
+}
+fn range(_ start: usize, _ count: usize, _ total: usize) -> bool { start <= total && count <= total - start }
+
+impl Records {
+    fn definition(self, _ node: u16, _ role: u16) -> usize {
+        var found: usize = 256
+        var i: usize = 0
+        while i < self.definition_count {
+            let row = self.definitions[i]
+            if row[0] == node && row[1] == role {
+                if found != 256 { return 256 }
+                found = i
+            }
+            i += 1
+        }
+        found
+    }
+    fn output(self, _ node: u16, _ role: u16, _ run: u16, _ port: u16) -> usize {
+        var found: usize = 1024
+        var i: usize = 0
+        while i < self.output_count {
+            let row = self.outputs[i]
+            if row[0] == node && row[1] == role && row[2] == run && row[3] == port {
+                if found != 1024 { return 1024 }
+                found = i
+            }
+            i += 1
+        }
+        found
+    }
+    fn payload(self, _ first: usize, _ second: usize) -> bool {
+        let a = self.items[first]
+        let b = self.items[second]
+        if a[8] != 1 || b[8] != 1 || a[10] != b[10] { return false }
+        let start_a = a[9] as usize
+        let start_b = b[9] as usize
+        let length = a[10] as usize
+        if !range(start_a, length, self.pool_length) || !range(start_b, length, self.pool_length) { return false }
+        var i: usize = 0
+        while i < length {
+            if self.pool.byte_at((start_a + i).downcast_truncate()) != self.pool.byte_at((start_b + i).downcast_truncate()) { return false }
+            i += 1
+        }
+        true
+    }
+    // Wire table intervals retain saved arrays, including empty output ports.
+    // These checks protect every index the boundary audit subsequently uses.
+    fn structure(self) -> bool {
+        var i: usize = 0
+        while i < self.task_count {
+            let task = self.tasks[i]
+            if task[0] == 0 || task[1] > 1 || task[5] > 1 || task[8] > 1 || !range(task[3] as usize, task[4] as usize, self.source_count) || !range(task[6] as usize, task[7] as usize, self.output_count) { return false }
+            var j: usize = 0
+            while j < task[4] as usize {
+                let source = self.sources[task[3] as usize + j]
+                if source[0] != task[0] || source[1] != task[1] || source[2] != task[2] || source[3] as usize != j || source[7] > 1 { return false }
+                j += 1
+            }
+            j = 0
+            while j < task[7] as usize {
+                let output = self.outputs[task[6] as usize + j]
+                if output[0] != task[0] || output[1] != task[1] || output[2] != task[2] || output[3] as usize != j { return false }
+                j += 1
+            }
+            i += 1
+        }
+        i = 0
+        while i < self.output_count {
+            let output = self.outputs[i]
+            if !range(output[4] as usize, output[5] as usize, self.item_count) { return false }
+            var j: usize = 0
+            while j < output[5] as usize {
+                let item = self.items[output[4] as usize + j]
+                if item[0] != output[0] as u32 || item[1] != output[1] as u32 || item[2] != output[2] as u32 || item[3] != output[3] as u32 || item[4] as usize != j || item[7] > 1 || item[8] > 1 || !range(item[5] as usize, item[6] as usize, self.pair_count) { return false }
+                j += 1
+            }
+            i += 1
+        }
+        true
+    }
+}
+
+pub fn audit(_ records: Records) -> Report {
+    var report = Report::new()
+    if records.issue != 0 { report.issue = records.issue
+        return report }
+    if !records.structure() { report.issue = 15
+        return report }
+    let parent = records.parent
+    let child = records.child
+    if !valid_id(parent[0], parent[1]) || !valid_id(parent[2], parent[3]) || !valid_id(child[0], child[1]) || !valid_id(child[2], child[3]) || parent[4] != 1 || child[4] != 1 { report.issue = 20
+        return report }
+
+    // Select the actual recorded call by a present, valid child execution ID.
+    var call: usize = 256
+    var i: usize = 0
+    while i < records.task_count {
+        let task = records.tasks[i]
+        if task[1] == 0 && same_id(task[9], task[10], child[0], child[1]) {
+            if call != 256 { report.issue = 21
+                return report }
+            call = i
+        }
+        i += 1
+    }
+    if call == 256 { report.issue = 21
+        return report }
+    let call_task = records.tasks[call]
+    report.call_node = call_task[0]
+    report.call_run = call_task[2]
+    let call_definition = records.definition(call_task[0], 0)
+    if call_definition == 256 { report.issue = 22
+        return report }
+    let call_def = records.definitions[call_definition]
+    if call_def[2] != 2 || call_def[3] != 4 || (call_def[4] != 0 && call_def[4] != 5) || (call_def[5] != 0 && call_def[5] != 6) || !same_id(call_task[11], call_task[12], child[2], child[3]) { report.issue = 22
+        return report }
+
+    var trigger: usize = 256
+    i = 0
+    while i < records.task_count {
+        let task = records.tasks[i]
+        if task[1] == 1 {
+            if task[5] != 1 { report.issue = 23
+                return report }
+            if task[4] == 0 {
+                if trigger != 256 { report.issue = 23
+                    return report }
+                trigger = i
+            }
+        }
+        i += 1
+    }
+    if trigger == 256 { report.issue = 23
+        return report }
+    let trigger_task = records.tasks[trigger]
+    let trigger_definition = records.definition(trigger_task[0], 1)
+    if trigger_task[2] != 0 || trigger_definition == 256 { report.issue = 23
+        return report }
+    let trigger_def = records.definitions[trigger_definition]
+    if trigger_def[2] != 3 || trigger_def[6] != 8 || !same_id(trigger_task[13], trigger_task[14], parent[0], parent[1]) || !same_id(trigger_task[15], trigger_task[16], parent[2], parent[3]) { report.issue = 24
+        return report }
+
+    if call_task[5] != 1 || call_task[4] != 1 { report.issue = 25
+        return report }
+    let input_source = records.sources[call_task[3] as usize]
+    if input_source[7] != 1 { report.issue = 25
+        return report }
+    let caller_input = records.output(input_source[4], 0, input_source[5], input_source[6])
+    let trigger_output = records.output(trigger_task[0], 1, 0, 0)
+    if caller_input == 1024 || trigger_output == 1024 || trigger_task[8] != 1 || trigger_task[7] != 1 { report.issue = 25
+        return report }
+    let input_output = records.outputs[caller_input]
+    let start_output = records.outputs[trigger_output]
+    let root_count = input_output[5]
+    if root_count == 0 || root_count > 256 || start_output[5] != root_count { report.issue = 26
+        return report }
+    report.root_count = root_count
+    i = 0
+    while i < root_count as usize {
+        let start_index = start_output[4] as usize + i
+        let item = records.items[start_index]
+        if !records.payload(input_output[4] as usize + i, start_index) || item[7] != 1 || item[6] == 0 { report.issue = 26
+            return report }
+        var j: usize = 0
+        while j < item[6] as usize {
+            let pair = records.pairs[item[5] as usize + j]
+            if pair[6] != 1 || pair[2] != 0 || pair[1] != 0 || pair[0] as usize != i { report.issue = 26
+                return report }
+            j += 1
+        }
+        i += 1
+    }
+
+    var terminal: usize = 256
+    i = 0
+    while i < records.task_count {
+        let task = records.tasks[i]
+        if task[1] == 1 && task[0] == records.terminal_node {
+            if terminal == 256 || task[2] > records.tasks[terminal][2] { terminal = i }
+        }
+        i += 1
+    }
+    if records.terminal_present != 1 || terminal == 256 { report.issue = 27
+        return report }
+    let terminal_task = records.tasks[terminal]
+    report.terminal_run = terminal_task[2]
+    if terminal_task[8] != 1 || call_task[8] != 1 || terminal_task[7] != call_task[7] { report.issue = 28
+        return report }
+
+    var graph = Graph::new(root_count, ProducerRef::new(trigger_task[0], 0, 0))
+    i = 0
+    while i < records.source_count {
+        let source = records.sources[i]
+        if source[1] == 1 {
+            graph.add_source(source[0], source[2], source[3], ProducerRef::new(source[4], source[5], source[6]), source[7] == 1)
+        }
+        i += 1
+    }
+    var next_pair: usize = 0
+    i = 0
+    while i < records.item_count {
+        let item = records.items[i]
+        if item[1] == 1 {
+            let count = item[6] as usize
+            var j: usize = 0
+            while j < count {
+                let pair = records.pairs[item[5] as usize + j]
+                graph.add_pair(pair[0], pair[1], pair[2] == 1, ProducerRef::new(pair[3], pair[4], pair[5]), pair[6] == 1 && pair[2] <= 1)
+                j += 1
+            }
+            graph.add_vertex(Coordinate::new(item[0].downcast_truncate(), item[2].downcast_truncate(), item[3].downcast_truncate(), item[4].downcast_truncate()), next_pair, count, item[7] == 1)
+            next_pair += count
+        }
+        i += 1
+    }
+    if graph.failure() != 0 { report.issue = 29
+        report.graph_issue = graph.failure()
+        return report }
+
+    // Complete every required row before choosing the aggregate verdict.
+    i = 0
+    while i < call_task[7] as usize {
+        let actual_output = records.outputs[call_task[6] as usize + i]
+        let returned_output = records.outputs[terminal_task[6] as usize + i]
+        if actual_output[5] != returned_output[5] { report.issue = 28
+            return report }
+        var j: usize = 0
+        while j < actual_output[5] as usize {
+            if report.checked == 256 { report.issue = 29
+                return report }
+            let actual_index = actual_output[4] as usize + j
+            let terminal_index = returned_output[4] as usize + j
+            let actual_item = records.items[actual_index]
+            if !records.payload(actual_index, terminal_index) || actual_item[7] != 1 || actual_item[6] == 0 { report.issue = 30
+                return report }
+            var observed = RootSet<256>::EMPTY
+            var k: usize = 0
+            while k < actual_item[6] as usize {
+                let pair = records.pairs[actual_item[5] as usize + k]
+                if pair[6] != 1 || pair[2] != 0 || pair[1] != 0 || pair[0] >= root_count { report.issue = 30
+                    return report }
+                observed.put(pair[0] as usize)
+                k += 1
+            }
+            let traced = graph.trace(Coordinate::new(terminal_task[0], terminal_task[2], returned_output[3], j.downcast_truncate()))
+            if traced == 256 { report.issue = 31
+                report.graph_issue = graph.failure()
+                return report }
+            let expected = graph.roots(traced)
+            let mismatch = !expected.same(observed)
+            report.findings[report.checked] = Finding { output: actual_output[3], item: j.downcast_truncate(), expected, observed, mismatch }
+            report.checked += 1
+            if mismatch { report.mismatches += 1 }
+            j += 1
+        }
+        i += 1
+    }
+    if report.checked == 0 { report.issue = 32 }
+    report
+}
